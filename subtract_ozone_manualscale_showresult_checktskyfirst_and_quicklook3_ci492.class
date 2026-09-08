@@ -1,0 +1,507 @@
+! ==========================================================
+!  subtract_ozone_manualscale_showresult_checktskyfirst_and_quicklook3_ci492.class
+! ==========================================================
+!
+! PART 1:
+!   Subtract manually scaled TSKYEBB ozone from raw science:
+!
+!      corrected = science - scale * tskyebb
+!
+!   where:
+!
+!      scale = science_amp / tskyebb_amp
+!
+!   Science scan n uses TSKYEBB scan n-1 ONLY.
+!
+!   IMPORTANT:
+!      This script first checks whether TSKYEBB scan n-1 exists.
+!      If it does not exist, it writes the science spectrum unchanged.
+!      It does NOT use TSKYEBB scan n.
+!
+!   IMPORTANT:
+!      science_amp, tskyebb_amp, scale, and do_subtract are reset
+!      at the start of every science scan.
+!
+!      If you see no ozone feature, just type c at the PAUSE.
+!      Then the amplitude remains 0 and the science spectrum is
+!      written unchanged.
+!
+!   IMPORTANT FIX:
+!      The subtraction is now controlled by do_subtract.
+!      It does NOT require scale.gt.0.0.
+!      Therefore negative scale factors are also allowed.
+!
+! Inputs:
+!   /aux/pc20014a/tnandre/Analysis/apex_ci492_all_raw1.30m
+!   /aux/pc20014a/tnandre/Analysis/tskyebb_ci492_all_byscan_raw1.30m
+!
+! Intermediate output:
+!   /aux/pc20014a/tnandre/Analysis/apex_ci492_all_subozone_manualscale_raw1.30m
+!
+! Final output:
+!   /aux/pc20014a/tnandre/Analysis/quicklook3_apex_ci492_all_subozone_manualscale_raw1_nosmooth.hifi
+! ==========================================================
+
+sys "rm -f sci_list.txt sci_pairs.txt sci_sources.txt sci_scans.txt nsci.txt"
+sys "rm -f source_obs.list vmin.list vmax.list vwindow.awk __list.txt __nobs.txt"
+sys "rm -f /aux/pc20014a/tnandre/Analysis/apex_ci492_all_subozone_manualscale_raw1.30m"
+sys "rm -f /aux/pc20014a/tnandre/Analysis/quicklook3_apex_ci492_all_subozone_manualscale_raw1_nosmooth.hifi"
+
+! ==========================================================
+! PART 1: manual-scale ozone subtraction
+! ==========================================================
+
+let scale 0.0 /new real
+let science_amp 0.0 /new real
+let tskyebb_amp 0.0 /new real
+
+let nsci 0 /new int
+let sscan 0 /new int
+let oscan 0 /new int
+let nout 0 /new int
+
+let first_sci 1 /new int
+let first_ozone 1 /new int
+let do_subtract 0 /new int
+
+def char sci_src*32[5000]
+def int sci_scan[5000]
+
+file in "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_raw1.30m"
+
+  set source *
+set line CI492
+set scan *
+set sub *
+set number *
+find
+
+list /out sci_list.txt
+
+! CLASS list columns:
+!   $2 = source
+!   $3 = line
+!   $8 = scan
+sys "awk '$3 ~ /^CI492$/ && $2 ~ /^G/ {print $2,$8}' sci_list.txt | awk '!seen[$0]++' > sci_pairs.txt"
+
+sys "awk '{print $1}' sci_pairs.txt > sci_sources.txt"
+sys "awk '{print $2}' sci_pairs.txt > sci_scans.txt"
+sys "awk 'END{print NR}' sci_pairs.txt > nsci.txt"
+
+accept nsci /col nsci.txt
+
+if nsci.gt.0
+  accept sci_src /column sci_sources.txt /line 1 nsci
+  accept sci_scan /column sci_scans.txt /line 1 nsci
+endif
+
+file out "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_subozone_manualscale_raw1.30m" MULTIPLE /overwrite
+
+for i 1 to nsci
+
+  let sscan sci_scan[i]
+  let oscan sscan-1
+
+  ! Reset manual values for every science scan
+  let science_amp 0.0
+  let tskyebb_amp 0.0
+  let scale 0.0
+  let do_subtract 0
+
+  say "---------------------------------------------"
+  say "Science source:" 'sci_src[i]'
+  say "Science scan =" 'sscan'
+  say "TSKYEBB scan =" 'oscan'
+
+  ! --------------------------------------------------------
+  ! First check matching TSKYEBB spectrum, scan n-1
+  ! --------------------------------------------------------
+  file in "/aux/pc20014a/tnandre/Analysis/tskyebb_ci492_all_byscan_raw1.30m"
+
+  set source TSKYEBB-*
+  set line CI492
+  set scan oscan oscan
+  set sub *
+  set number *
+  find
+
+  if found.gt.0
+
+    get first
+      modify frequency 492160.651
+    set unit v
+
+    if first_ozone.eq.1
+      define double ozone /like ry
+      let first_ozone 0
+    endif
+
+    let ozone ry
+
+    ! ------------------------------------------------------
+    ! Load science spectrum
+    ! ------------------------------------------------------
+    file in "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_raw1.30m"
+
+    set source 'sci_src[i]'
+    set line CI492
+    set scan sscan sscan
+    set sub *
+    set number *
+    find
+
+    if found.gt.0
+
+      get first
+
+      modify frequency 492160.651
+      set unit v
+
+      if first_sci.eq.1
+        define double sci /like ry
+        let first_sci 0
+      endif
+
+      let sci ry
+
+      say "Showing SCIENCE spectrum."
+      say "Source:" 'sci_src[i]'
+      say "Science scan =" 'sscan'
+      say "If ozone is present, at PAUSE type:"
+      say "let science_amp YOUR_VALUE"
+      say "then type c"
+      say "If no ozone is present, just type c."
+
+      set mode x -300 300
+      set mode y t
+      pl
+
+      pause
+
+      say "Science amplitude used =" 'science_amp'
+
+      ! ----------------------------------------------------
+      ! Show matching TSKYEBB spectrum
+      ! ----------------------------------------------------
+      file in "/aux/pc20014a/tnandre/Analysis/tskyebb_ci492_all_byscan_raw1.30m"
+
+      set source TSKYEBB-*
+      set line CI492
+      set scan oscan oscan
+      set sub *
+      set number *
+      find
+
+      get first
+
+      modify frequency 492160.651
+       set unit v
+
+      let ozone ry
+
+      say "Showing matching TSKYEBB spectrum."
+      say "TSKYEBB scan =" 'oscan'
+      say "If ozone is present, at PAUSE type:"
+      say "let tskyebb_amp YOUR_VALUE"
+      say "then type c"
+      say "If no ozone is present, just type c."
+
+      set mode x -300 300
+      set mode y t
+      pl
+
+      pause
+
+      say "TSKYEBB amplitude used =" 'tskyebb_amp'
+
+      ! ----------------------------------------------------
+      ! Decide scale safely
+      ! ----------------------------------------------------
+      if science_amp.eq.0.0
+
+        say "Science amplitude is 0."
+        say "No ozone subtraction will be applied."
+        let scale 0.0
+        let do_subtract 0
+
+      else
+
+        if tskyebb_amp.eq.0.0
+
+          say "TSKYEBB amplitude is 0."
+          say "No ozone subtraction will be applied."
+          let scale 0.0
+          let do_subtract 0
+
+        else
+
+          let scale science_amp/tskyebb_amp
+          let do_subtract 1
+
+        endif
+
+      endif
+
+      say "Science amplitude =" 'science_amp'
+      say "TSKYEBB amplitude =" 'tskyebb_amp'
+      say "Scale =" 'scale'
+      say "Do subtract =" 'do_subtract'
+
+      ! ----------------------------------------------------
+      ! Reload science header, replace data with corrected ry
+      ! ----------------------------------------------------
+      file in "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_raw1.30m"
+
+      set source 'sci_src[i]'
+      set line CI492
+      set scan sscan sscan
+      set sub *
+      set number *
+      find
+
+       if found.gt.0
+
+        get first
+
+        modify frequency 492160.651
+        set unit v
+
+        if do_subtract.eq.1
+          let ry sci-scale*ozone
+        else
+          let ry sci
+        endif
+
+        say "Showing RESULT spectrum."
+        say "Source:" 'sci_src[i]'
+        say "Science scan =" 'sscan'
+        say "TSKYEBB scan =" 'oscan'
+        say "Scale =" 'scale'
+        say "Do subtract =" 'do_subtract'
+        say "At PAUSE type c to write this spectrum."
+
+        set mode x -300 300
+        set mode y t
+        pl
+
+        pause
+
+        let nout nout+1
+        write nout 1
+
+      endif
+
+    else
+
+      say "WARNING: science source/scan not found:" 'sci_src[i]' 'sscan'
+
+    endif
+
+  else
+
+    say "WARNING: no matching TSKYEBB scan n-1 found."
+    say "Science source:" 'sci_src[i]'
+    say "Science scan =" 'sscan'
+    say "Expected TSKYEBB scan =" 'oscan'
+    say "Writing science unchanged."
+
+    file in "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_raw1.30m"
+
+    set source 'sci_src[i]'
+    set line CI492
+    set scan sscan sscan
+    set sub *
+    set number *
+    find
+
+    if found.gt.0
+
+      get first
+
+      modify frequency 492160.651
+      set unit v
+
+      let nout nout+1
+      write nout 1
+      endif
+
+  endif
+
+next
+
+say "DONE ozone subtraction."
+say "Raw corrected spectra written =" 'nout'
+say "Output raw:"
+say "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_subozone_manualscale_raw1.30m"
+
+sys "rm -f sci_list.txt sci_pairs.txt sci_sources.txt sci_scans.txt nsci.txt"
+
+! ==========================================================
+! PART 2: quicklook3 reduction, no smoothing
+! ==========================================================
+
+file in "/aux/pc20014a/tnandre/Analysis/apex_ci492_all_subozone_manualscale_raw1.30m"
+file out "/aux/pc20014a/tnandre/Analysis/quicklook3_apex_ci492_all_subozone_manualscale_raw1_nosmooth.hifi" multiple /overwrite
+
+set source *
+set line *
+set scan *
+set sub *
+set number *
+find
+
+! Auto-count observations in current index
+sys "rm -f __list.txt __nobs.txt"
+list /out __list.txt
+sys "awk '/^[ ]*[0-9]+;[0-9]+/ {n++} END{print n}' __list.txt > __nobs.txt"
+
+let nobs 0 /new int
+accept nobs /col __nobs.txt
+sys "rm -f __nobs.txt"
+
+! Build per-observation SOURCE list from __list.txt
+sys "rm -f source_obs.list"
+sys "awk '/^[ ]*[0-9]+;[0-9]+/ {print $2}' __list.txt > source_obs.list"
+sys "rm -f __list.txt"
+
+! Clean old files
+sys "rm -f vmin.list vmax.list vwindow.awk"
+
+! Build AWK program, velocity window table
+sys "echo '/^G[0-9]/{lon=substr($0,2,5)+0;' > vwindow.awk"
+
+sys "echo ' if(lon<2){vmin=-75;vmax=280}' >> vwindow.awk"
+sys "echo ' else if(lon<4){vmin=-52;vmax=258}' >> vwindow.awk"
+sys "echo ' else if(lon<6){vmin=-40;vmax=195}' >> vwindow.awk"
+sys "echo ' else if(lon<8){vmin=-30;vmax=190}' >> vwindow.awk"
+sys "echo ' else if(lon<10){vmin=-20;vmax=182}' >> vwindow.awk"
+sys "echo ' else if(lon<12){vmin=-15;vmax=160}' >> vwindow.awk"
+sys "echo ' else if(lon<14){vmin=-8;vmax=158}' >> vwindow.awk"
+sys "echo ' else if(lon<16){vmin=-10;vmax=148}' >> vwindow.awk"
+sys "echo ' else if(lon<18){vmin=-8;vmax=135}' >> vwindow.awk"
+sys "echo ' else if(lon<20){vmin=-10;vmax=130}' >> vwindow.awk"
+sys "echo ' else if(lon<25){vmin=-14;vmax=124}' >> vwindow.awk"
+sys "echo ' else if(lon<30){vmin=-20;vmax=116}' >> vwindow.awk"
+sys "echo ' else if(lon<35){vmin=-40;vmax=108}' >> vwindow.awk"
+sys "echo ' else if(lon<40){vmin=-50;vmax=90}' >> vwindow.awk"
+sys "echo ' else if(lon<45){vmin=-50;vmax=76}' >> vwindow.awk"
+sys "echo ' else if(lon<50){vmin=-45;vmax=76}' >> vwindow.awk"
+sys "echo ' else if(lon<55){vmin=-50;vmax=55}' >> vwindow.awk"
+sys "echo ' else if(lon<60){vmin=-70;vmax=50}' >> vwindow.awk"
+sys "echo ' else if(lon<65){vmin=-78;vmax=30}' >> vwindow.awk"
+sys "echo ' else if(lon<70){vmin=-74;vmax=28}' >> vwindow.awk"
+sys "echo ' else if(lon<75){vmin=-78;vmax=20}' >> vwindow.awk"
+sys "echo ' else if(lon<80){vmin=-75;vmax=20}' >> vwindow.awk"
+sys "echo ' else if(lon<85){vmin=-88;vmax=14}' >> vwindow.awk"
+sys "echo ' else if(lon<90){vmin=-80;vmax=16}' >> vwindow.awk"
+sys "echo ' else if(lon<95){vmin=-75;vmax=20}' >> vwindow.awk"
+sys "echo ' else if(lon<100){vmin=-70;vmax=4}' >> vwindow.awk"
+sys "echo ' else if(lon<105){vmin=-70;vmax=2}' >> vwindow.awk"
+sys "echo ' else if(lon<110){vmin=-78;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<115){vmin=-75;vmax=8}' >> vwindow.awk"
+sys "echo ' else if(lon<120){vmin=-70;vmax=4}' >> vwindow.awk"
+sys "echo ' else if(lon<125){vmin=-75;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<130){vmin=-65;vmax=5}' >> vwindow.awk"
+sys "echo ' else if(lon<135){vmin=-50;vmax=2}' >> vwindow.awk"
+sys "echo ' else if(lon<140){vmin=-48;vmax=6}' >> vwindow.awk"
+sys "echo ' else if(lon<145){vmin=-48;vmax=8}' >> vwindow.awk"
+sys "echo ' else if(lon<150){vmin=-40;vmax=4}' >> vwindow.awk"
+sys "echo ' else if(lon<155){vmin=-40;vmax=8}' >> vwindow.awk"
+sys "echo ' else if(lon<160){vmin=-30;vmax=8}' >> vwindow.awk"
+sys "echo ' else if(lon<165){vmin=-28;vmax=4}' >> vwindow.awk"
+sys "echo ' else if(lon<170){vmin=-20;vmax=5}' >> vwindow.awk"
+sys "echo ' else if(lon<175){vmin=-24;vmax=5}' >> vwindow.awk"
+sys "echo ' else if(lon<180){vmin=-18;vmax=6}' >> vwindow.awk"
+sys "echo ' else if(lon<185){vmin=-8;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<190){vmin=-8;vmax=20}' >> vwindow.awk"
+sys "echo ' else if(lon<195){vmin=-2;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<200){vmin=0;vmax=20}' >> vwindow.awk"
+sys "echo ' else if(lon<205){vmin=4;vmax=38}' >> vwindow.awk"
+sys "echo ' else if(lon<210){vmin=5;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<215){vmin=10;vmax=50}' >> vwindow.awk"
+sys "echo ' else if(lon<220){vmin=10;vmax=58}' >> vwindow.awk"
+sys "echo ' else if(lon<225){vmin=6;vmax=65}' >> vwindow.awk"
+sys "echo ' else if(lon<230){vmin=18;vmax=75}' >> vwindow.awk"
+sys "echo ' else if(lon<235){vmin=18;vmax=80}' >> vwindow.awk"
+sys "echo ' else if(lon<240){vmin=18;vmax=90}' >> vwindow.awk"
+sys "echo ' else if(lon<245){vmin=18;vmax=92}' >> vwindow.awk"
+sys "echo ' else if(lon<250){vmin=10;vmax=100}' >> vwindow.awk"
+sys "echo ' else if(lon<255){vmin=5;vmax=95}' >> vwindow.awk"
+sys "echo ' else if(lon<260){vmin=2;vmax=92}' >> vwindow.awk"
+sys "echo ' else if(lon<265){vmin=5;vmax=80}' >> vwindow.awk"
+sys "echo ' else if(lon<270){vmin=-10;vmax=80}' >> vwindow.awk"
+sys "echo ' else if(lon<275){vmin=-10;vmax=80}' >> vwindow.awk"
+sys "echo ' else if(lon<280){vmin=-18;vmax=60}' >> vwindow.awk"
+sys "echo ' else if(lon<285){vmin=-28;vmax=52}' >> vwindow.awk"
+sys "echo ' else if(lon<290){vmin=-30;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<295){vmin=-38;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<300){vmin=-50;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<305){vmin=-56;vmax=42}' >> vwindow.awk"
+sys "echo ' else if(lon<310){vmin=-68;vmax=42}' >> vwindow.awk"
+sys "echo ' else if(lon<315){vmin=-68;vmax=50}' >> vwindow.awk"
+sys "echo ' else if(lon<320){vmin=-80;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<325){vmin=-98;vmax=40}' >> vwindow.awk"
+sys "echo ' else if(lon<330){vmin=-120;vmax=30}' >> vwindow.awk"
+sys "echo ' else if(lon<335){vmin=-120;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<340){vmin=-140;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<342){vmin=-150;vmax=14}' >> vwindow.awk"
+sys "echo ' else if(lon<344){vmin=-162;vmax=18}' >> vwindow.awk"
+sys "echo ' else if(lon<346){vmin=-164;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<348){vmin=-170;vmax=10}' >> vwindow.awk"
+sys "echo ' else if(lon<350){vmin=-190;vmax=30}' >> vwindow.awk"
+sys "echo ' else if(lon<352){vmin=-210;vmax=50}' >> vwindow.awk"
+sys "echo ' else if(lon<354){vmin=-220;vmax=90}' >> vwindow.awk"
+sys "echo ' else if(lon<356){vmin=-265;vmax=120}' >> vwindow.awk"
+sys "echo ' else if(lon<358){vmin=-228;vmax=152}' >> vwindow.awk"
+sys "echo ' else if(lon<360){vmin=-165;vmax=195}' >> vwindow.awk"
+
+sys "echo ' print vmin > VMIN; print vmax > VMAX; next }' >> vwindow.awk"
+sys "echo '{print -120 > VMIN; print 120 > VMAX}' >> vwindow.awk"
+
+sys "awk -v VMIN=vmin.list -v VMAX=vmax.list -f vwindow.awk source_obs.list"
+
+def real vminarr[nobs]
+def real vmaxarr[nobs]
+accept vminarr /col vmin.list
+accept vmaxarr /col vmax.list
+
+let vmin  0.0 /new real
+let vmax2 0.0 /new real
+
+get first
+
+let vmin  vminarr[1]
+let vmax2 vmaxarr[1]
+
+set unit v
+modify frequency 492160.651
+modify beam_eff 0.54 0.95
+
+set window vmin vmax2
+base 0
+
+write
+
+for j 2 to nobs
+
+  get next
+
+  let vmin  vminarr[j]
+  let vmax2 vmaxarr[j]
+
+  set unit v
+  modify frequency 492160.651
+  modify beam_eff 0.54 0.95
+
+  set window vmin vmax2
+  base 0
+
+  write
+
+next
+
+sys "rm -f source_obs.list vmin.list vmax.list vwindow.awk"
+
+say "DONE quicklook3."
+say "Final output:"
+say "/aux/pc20014a/tnandre/Analysis/quicklook3_apex_ci492_all_subozone_manualscale_raw1_nosmooth.hifi"
